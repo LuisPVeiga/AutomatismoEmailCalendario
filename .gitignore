@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Credenciais e tokens OAuth (NUNCA versionar)
+config/credentials.json
+config/token.json
+config/calendar_token.json
+
+# Estado persistente
+config/processed_emails.json
+
+# Logs
+logs/
+
+# Variáveis de ambiente
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
