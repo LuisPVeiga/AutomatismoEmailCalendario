@@ -79,6 +79,10 @@ _VENCIMENTO_PATTERNS: List[re.Pattern] = [p for p in (re.compile(r, re.IGNORECAS
     r"data\s*do\s*d[eé]bito\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
     r"d[eé]bito\s*(?:em|a|em|na)?\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
     r"(\d{1,2})\s*de\s*(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s*de\s*(\d{4})",
+    # Formato por extenso com abreviaturas PT-PT (ex: "28 abr 2026")
+    r"(?:data\s*(?:de\s*)?)?vencimento\s*[:\-]?\s*(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})",
+    r"(?:data\s*)?limite\s*(?:de\s*pagamento)?\s*[:\-]?\s*(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})",
+    r"(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})",
     r"d[aá]bili?t\s*a\s*partir\s*de\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{4})",
     r"(\d{1,2}[/. -]\d{1,2}[/. -]\d{4})",
 ])]
@@ -157,6 +161,11 @@ _MONTHS_PT = {
     "abril": "04", "maio": "05", "junho": "06",
     "julho": "07", "agosto": "08", "setembro": "09",
     "outubro": "10", "novembro": "11", "dezembro": "12",
+    # Abreviaturas PT-PT
+    "jan": "01", "fev": "02", "mar": "03",
+    "abr": "04", "mai": "05", "jun": "06",
+    "jul": "07", "ago": "08", "set": "09",
+    "out": "10", "nov": "11", "dez": "12",
 }
 
 
