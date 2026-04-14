@@ -53,6 +53,9 @@ _NUM_EN = r"\d{1,3}(?:,\d{3})*\.\d{2}"   # 1,234.56
 _NUM_SIMPLE = r"\d+[,.]\d{2}"             # 45,99 ou 45.99
 
 _VALOR_PATTERNS: List[re.Pattern] = [p for p in (re.compile(r, re.IGNORECASE) for r in [
+    # Total (€) / Total (E) / Total (e) / Total: — robusto para variações OCR do símbolo €
+    # \s* permite valor na mesma linha ou na linha imediatamente a seguir (layout duas colunas)
+    rf"total\s*(?:\([^)\n]{{0,5}}\))?\s*[:\-][^\S\n]*\n?[^\S\n]*({_NUM_PT}|{_NUM_EN}|{_NUM_SIMPLE})",
     rf"total\s*a\s*pagar\s*[:\-]?\s*€?\s*({_NUM_PT}|{_NUM_EN}|{_NUM_SIMPLE})",
     rf"valor\s*(?:total|a\s*pagar|fatura)\s*[:\-]?\s*€?\s*({_NUM_PT}|{_NUM_EN}|{_NUM_SIMPLE})",
     rf"montante\s*(?:total|a\s*pagar)?\s*[:\-]?\s*€?\s*({_NUM_PT}|{_NUM_EN}|{_NUM_SIMPLE})",
@@ -73,6 +76,8 @@ _VENCIMENTO_PATTERNS: List[re.Pattern] = [p for p in (re.compile(r, re.IGNORECAS
     r"(?:data\s*)?limite\s*(?:de\s*pagamento)?\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
     r"pagar\s*at[eé]\s*(?:ao)?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
     r"due\s*date\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
+    r"data\s*do\s*d[eé]bito\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
+    r"d[eé]bito\s*(?:em|a|em|na)?\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4})",
     r"(\d{1,2})\s*de\s*(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s*de\s*(\d{4})",
     r"d[aá]bili?t\s*a\s*partir\s*de\s*[:\-]?\s*(\d{1,2}[/. -]\d{1,2}[/. -]\d{4})",
     r"(\d{1,2}[/. -]\d{1,2}[/. -]\d{4})",
@@ -323,7 +328,60 @@ class PDFExtractor:
             if result is not None:
                 return result
 
+        # Fallback: OCR em duas colunas — "Total" numa linha, valor numa linha próxima separada
+        result = self._extract_value_near_total(text, min_val, max_val)
+        if result is not None:
+            return result
+
+        # Último recurso: OCR não leu nenhum label — pega o único número decimal no intervalo válido
+        result = self._extract_value_last_resort(text, min_val, max_val)
+        if result is not None:
+            return result
+
         return None
+
+    _TOTAL_ANCHOR = re.compile(r"\btotal\b", re.IGNORECASE)
+    _DECIMAL_NUMBER = re.compile(r"\b(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\b")
+    # Número decimal simples: 26,49 ou 26.49 (não captura datas DD-MM-YYYY)
+    _ANY_DECIMAL = re.compile(r"(?<![\d\-/])\b(\d{1,4}[,\.]\d{2})\b(?![\d\-/])")
+
+    def _extract_value_near_total(self, text: str, min_val: float, max_val: float) -> Optional[float]:
+        """
+        Fallback para OCR em duas colunas: procura a palavra 'Total' no texto
+        e depois a primeira ocorrência de um número decimal a partir dessa linha.
+        """
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if self._TOTAL_ANCHOR.search(line):
+                # Pesquisar a partir da linha do Total até ao fim do texto
+                remaining = "\n".join(lines[i:])
+                after_colon = re.split(r"[:\-]", remaining, maxsplit=1)
+                search_area = after_colon[1] if len(after_colon) > 1 else remaining
+                for m in self._DECIMAL_NUMBER.finditer(search_area):
+                    val = self._parse_value(m.group(1))
+                    if val is not None and min_val <= val <= max_val:
+                        return val
+        return None
+
+    def _extract_value_last_resort(self, text: str, min_val: float, max_val: float) -> Optional[float]:
+        """
+        Último recurso quando OCR não conseguiu ler nenhum label (ex: papel texturado).
+        Recolhe todos os números decimais no texto que estejam no intervalo válido.
+        Se houver apenas um candidato, usa-o. Se houver vários, usa o maior.
+        Números de cliente/contrato (sem vírgula/ponto decimal) não são apanhados.
+        Datas (DD-MM-YYYY, YYYY-MM-DD) não têm formato decimal e são ignoradas.
+        """
+        found = []
+        for m in self._ANY_DECIMAL.finditer(text):
+            val = self._parse_value(m.group(1))
+            if val is not None and min_val <= val <= max_val:
+                found.append(val)
+        if not found:
+            return None
+        if len(found) == 1:
+            return found[0]
+        # Múltiplos candidatos: devolver o maior (mais provável ser o total da fatura)
+        return max(found)
 
     def _try_value_pattern(
         self, pattern: re.Pattern, text: str, min_val: float, max_val: float
@@ -363,6 +421,13 @@ class PDFExtractor:
     # Data de vencimento
     # ------------------------------------------------------------------
 
+    # Prefixos de data de emissão — datas precedidas por estes termos são ignoradas
+    # emiss\w+ cobre: emissão, emissao, emissio (corrupção OCR), emissäo, etc.
+    _EMISSAO_LABELS = re.compile(
+        r"(?:data\s*de\s*emiss\w+|emiss\w+|emitid[ao]\s*em)\s*[:\-]?\s*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
     def _extract_date(self, text: str) -> Optional[str]:
         """Extrai data de vencimento e retorna no formato YYYY-MM-DD."""
         for pattern in _VENCIMENTO_PATTERNS:
@@ -378,6 +443,10 @@ class PDFExtractor:
                             if parsed:
                                 return parsed
                     else:
+                        # Para o padrão genérico (último da lista), ignorar datas de emissão
+                        preceding = text[max(0, match.start() - 60):match.start()]
+                        if self._EMISSAO_LABELS.search(preceding):
+                            continue
                         parsed = self._parse_date(groups[0])
                         if parsed:
                             return parsed

@@ -1,6 +1,6 @@
 # Automação de Emails para Contas a Pagar
 
-**Versão**: 1.0.0 | **Status**: ✅ PASSOS 1-7 Completos — Pronto para produção
+**Versão**: 1.1.0 | **Status**: ✅ PASSOS 1-8 Completos — Pronto para produção
 
 Aplicação Python que automatiza a gestão de contas a pagar (água, luz, gás, comunicações, seguros):
 
@@ -10,8 +10,8 @@ Aplicação Python que automatiza a gestão de contas a pagar (água, luz, gás,
 - 📅 Cria eventos no Google Calendar com notificações
 - 💬 Envia notificações via Telegram
 - 🔄 Rastreia emails processados para evitar duplicados
-- ⏱️ Executa manualmente ou agendado via Windows Task Scheduler
-- 📷 (FASE 2) API para processamento de fotos
+- ⏱️ Executa manualmente ou agendado (launchd/cron/Task Scheduler)
+- 📷 Bot Telegram recebe fotos de contas em papel → OCR → Calendar
 
 ---
 
@@ -48,12 +48,80 @@ Aplicação Python que automatiza a gestão de contas a pagar (água, luz, gás,
   - Scripts para Windows, macOS e Linux
   - Configuração interativa via `schedule_setup.py`
 
-### ⏳ Por Fazer
-- **PASSO 8**: API de fotos (fase futura)
+- **PASSO 8**: Telegram Bot para fotos
+  - Bot recebe fotos de contas em papel via Telegram
+  - OCR com tesseract — pré-processamento multi-variante (autocontrast + thresholds) robusto a papel texturado; selecciona automaticamente a variante com melhor leitura
+  - Extrai valor (`Total (€)` robusto a variações OCR como `Total (E)`, valor em coluna separada, etc.)
+  - Usa `data do débito` como data de vencimento (ignorando `data de emissão`)
+  - Fallback por último recurso: quando OCR não lê nenhum label, recolhe todos os decimais no intervalo válido
+  - Extrai vencimento, referência MB usando os mesmos regex dos PDFs
+  - Caption da foto usada como nome da entidade → `[Pagar] <entidade>` no Calendar
+  - Aceita também PDFs enviados directamente ao bot
+  - Quando valor não é encontrado, bot envia o texto OCR bruto para diagnóstico
+  - Polling a cada 60 segundos — não requer servidor exposto na internet
 
 ---
 
-## 🚀 Quickstart
+## � Diagrama de Comunicações
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║                         A TUA MÁQUINA                               ║
+║                                                                      ║
+║  ┌──────────────────────────────────────────────────────────────┐   ║
+║  │  PROCESSO 1 — Pipeline de emails (agendado às 08:00)         │   ║
+║  │                                                              │   ║
+║  │   launchd/cron ──► main.py                                   │   ║
+║  │                        │                                     │   ║
+║  │          ┌─────────────┼──────────────┐                      │   ║
+║  │          ▼             ▼              ▼                      │   ║
+║  │    GmailService   PDFExtractor  CalendarService              │   ║
+║  │          │             │              │                      │   ║
+║  │          │        StateManager        │                      │   ║
+║  │          └─────────────┴──────────────┘                      │   ║
+║  │                        │                                     │   ║
+║  │                  TelegramService ──────────────────────────► ║── ║─► Telegram
+║  └──────────────────────────────────────────────────────────────┘   ║
+║                                                                      ║
+║  ┌──────────────────────────────────────────────────────────────┐   ║
+║  │  PROCESSO 2 — Bot Telegram (contínuo, polling 60s)           │   ║
+║  │                                                              │   ║
+║  │   bot.py ◄─────── polling getUpdates ◄───────────────────── ║── ║─► Telegram
+║  │      │                                                       │   ║
+║  │      ├── foto  ──► ImageProcessor (OCR) ──► dados            │   ║
+║  │      │                                       │               │   ║
+║  │      └── PDF   ──► PDFExtractor      ──► dados               │   ║
+║  │                                             │                │   ║
+║  │                           ┌────────────────┴──┐             │   ║
+║  │                           ▼                   ▼             │   ║
+║  │                    CalendarService      TelegramService ──► ║── ║─► Telegram
+║  └──────────────────────────────────────────────────────────────┘   ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+APIs externas contactadas:
+
+  ┌─────────────────┐    ┌──────────────────────┐    ┌───────────────────┐
+  │   Gmail API      │    │  Google Calendar API  │    │  Telegram Bot API │
+  │  (Google)        │    │  (Google)             │    │                   │
+  │                  │    │                       │    │                   │
+  │ · list messages  │    │ · insert event        │    │ · getUpdates      │
+  │ · get message    │    │ · list events         │    │ · getFile         │
+  │ · get attachment │    │ · delete event        │    │ · sendMessage     │
+  │ · modify (read)  │    │                       │    │ · getMe           │
+  └─────────────────┘    └──────────────────────┘    └───────────────────┘
+        ▲                          ▲                          ▲ ▼
+        │            OAuth 2.0     │                  Bot Token│ │ polling
+        └──────────────────────────┘                          │ │
+                                                        Telemóvel
+                                                   (envia foto via Telegram)
+```
+
+**Nota de segurança**: A tua máquina nunca está exposta na internet.
+Ambos os processos abrem ligações para fora (Google/Telegram) — nunca aceitam ligações de fora.
+
+---
+
+## �🚀 Quickstart
 
 ### 1. Clonar e Configurar
 
@@ -109,6 +177,27 @@ echo '{"emails": {}, "last_run": null}' > config/processed_emails.json
    TELEGRAM_CHAT_ID=seu_chat_id
    ```
 
+### 4. Instalar Tesseract (necessário para OCR de fotos)
+
+```bash
+# macOS 14 (Sonoma) ou superior
+brew install tesseract tesseract-lang
+
+# macOS 13 (Ventura) ou inferior
+# O Homebrew pode falhar com erro de permissões. Corrigir primeiro:
+sudo chown -R $(whoami) /usr/local/share/man/man8
+chmod u+w /usr/local/share/man/man8
+# Depois instalar normalmente:
+brew install tesseract tesseract-lang
+
+# Ubuntu/Debian
+sudo apt install tesseract-ocr tesseract-ocr-por
+
+# Windows — descarregar instalador em:
+# https://github.com/UB-Mannheim/tesseract/wiki
+# (selecionar Portuguese como linguagem adicional)
+```
+
 ### Testar Ligações
 
 > ⚠️ Executar sempre a partir da **raiz do projeto** (`AutomatismoEmailCalendario/`)
@@ -120,7 +209,22 @@ python -m src.test_connections calendar # Só Calendar
 python -m src.test_connections telegram # Só Telegram
 ```
 
-### Agendar Automático
+### Correr o Bot Telegram (fotos)
+
+```bash
+# Num terminal separado — corre em paralelo com o agendamento
+python -m src.bot
+```
+
+O bot fica à escuta de fotos e PDFs enviados para o chat configurado no `.env`. Não precisa de servidor exposto — usa polling (o bot contacta o Telegram, não o contrário).
+
+**Como usar o bot:**
+1. Abre o Telegram e vai ao chat do bot
+2. Envia uma foto de uma conta em papel
+3. (Opcional) Adiciona o nome da entidade como legenda (ex: `EDP`, `Água Lisboa`)
+4. O bot responde com os dados extraídos e confirma o evento no Calendar
+
+### Agendar Automático (pipeline de emails)
 
 ```bash
 python config/schedule_setup.py install  # Instalar agendamento diário
@@ -141,8 +245,9 @@ AutomatismoEmailCalendario/
 │   │   ├── calendar_service.py      # Google Calendar ✅
 │   │   ├── telegram_service.py      # Notificações ✅
 │   │   ├── state_manager.py         # Rastreio de estado ✅
-│   │   └── image_processor.py       # Fotos (PASSO 8)
-│   ├── main.py                      # Orquestração ✅
+│   │   └── image_processor.py       # OCR de imagens ✅
+│   ├── main.py                      # Orquestração (pipeline emails) ✅
+│   ├── bot.py                       # Telegram Bot (fotos/PDFs) ✅
 │   ├── test_connections.py          # Testes de ligação ✅
 │   ├── config.py                    # Configurações ✅
 │   └── __init__.py
@@ -270,4 +375,4 @@ Para problemas:
 ---
 
 **Última atualização**: Abril 2026
-**Desenvolvido para**: Windows + Python 3.10+
+**Desenvolvido para**: macOS / Linux / Windows — Python 3.10+

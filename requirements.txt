@@ -1,3 +1,10 @@
+# Dependências de sistema (instalar antes do pip install):
+#   macOS:         brew install tesseract tesseract-lang
+#   macOS <= 13:   sudo chown -R $(whoami) /usr/local/share/man/man8 && chmod u+w /usr/local/share/man/man8
+#                  brew install tesseract tesseract-lang
+#   Ubuntu/Debian: sudo apt install tesseract-ocr tesseract-ocr-por
+#   Windows:       https://github.com/UB-Mannheim/tesseract/wiki
+
 google-auth-oauthlib>=1.1.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.2.0
@@ -10,3 +17,4 @@ pytesseract>=0.3.10
 pdf2image>=1.17.0
 python-dotenv>=1.0.0
 requests>=2.31.0
+Pillow>=10.0.0

@@ -1,8 +1,8 @@
 # CONTEXTO TÉCNICO - Automação de Emails para Contas a Pagar
 
 **Última Atualização**: Abril 2026  
-**Versão do Projeto**: 1.0.0  
-**Status Atual**: ✅ PASSO 7 Completo - Agendamento Automático
+**Versão do Projeto**: 1.1.0  
+**Status Atual**: ✅ PASSO 8 Completo — Telegram Bot para fotos
 
 ---
 
@@ -98,8 +98,13 @@ telegram.send_summary(10, 3, 250.75, 3)
 ```
 
 #### `src/services/image_processor.py`
-- ✅ Estrutura preparada para PASSO 8
-- ⏹️ Não implementado (fase 2)
+- ✅ Implementado (PASSO 8, revisto Abril 2026)
+- ✅ `validate_image(image_bytes)` — valida com PIL
+- ✅ `process_from_bytes(image_bytes, bill_type, entidade_nome)` — pré-processamento multi-variante + OCR `por+eng` + delega extração para `PDFExtractor._extract_data()`
+- ✅ `process_from_file(image_path)` — delega para `process_from_bytes()`
+- ✅ Retorna mesmo formato de `PDFExtractor.extract_from_file()` com `metodo_extracao="ocr_image"` + `_ocr_text` para diagnóstico
+- ✅ Pré-processamento multi-variante: `ImageOps.autocontrast` + thresholds variados + escala mínima 1500px; escolhe automaticamente a variante com mais caracteres alfanuméricos reconhecidos
+- ✅ Logging via `logger.info` → visível nos logs do bot (`logs/logs.txt` via handler configurado em `bot.py`)
 
 #### Ficheiros de Suporte
 - ✅ `requirements.txt` - Dependências Python
@@ -135,6 +140,11 @@ telegram.send_summary(10, 3, 250.75, 3)
 - ✅ OCR via pytesseract + pdf2image (graceful — só ativa se tesseract estiver instalado)
 - ✅ Campo `metodo_extracao` e `campos_encontrados` no resultado
 - ✅ `extract_from_file(pdf_bytes, bill_type)` aceita tipo de conta para aplicar padrões corretos
+- ✅ `Total (€)` robusto a variações OCR: aceita `(E)`, `(e)`, sem parênteses, valor na linha seguinte (duas colunas)
+- ✅ `data do débito` reconhecida como data de vencimento preferencial (acima de `data de emissão`)
+- ✅ `_EMISSAO_LABELS` ignora datas precedidas por labels de emissão (incluindo corrupções OCR como `emissio`)
+- ✅ `_extract_value_near_total()` — fallback para layout duas colunas: procura número decimal após linha "Total"
+- ✅ `_extract_value_last_resort()` — último recurso quando OCR não lê nenhum label: recolhe todos os decimais no intervalo válido e devolve o maior
 
 #### ✅ PASSO 4: Google Calendar API
 **Responsável**: `calendar_service.py`
@@ -183,13 +193,22 @@ telegram.send_summary(10, 3, 250.75, 3)
   - Hora configuravel (padrão 08:00)
   - Comandos: `install`, `remove`, `status` (executar via `python config/schedule_setup.py`)
 
-#### PASSO 8: API de Fotos (Futuro)
-**Responsável**: `image_processor.py` + API Flask/FastAPI
+#### PASSO 8: Telegram Bot para Fotos
+**Responsável**: `src/bot.py` + `src/services/image_processor.py`
 
-Não implementar agora. Quando chegar ao PASSO 8:
-- Criar endpoint `/upload_photo`
-- Implementar OCR básico
-- Extrair dados similares aos PDFs
+- ✅ `src/bot.py` — runner do bot com `python-telegram-bot` v20 (async)
+- ✅ `handle_photo()` — descarrega foto de maior resolução, chama `ImageProcessor`, cria evento Calendar, responde ao utilizador
+- ✅ `handle_document()` — aceita PDFs enviados directamente ao bot, usa `PDFExtractor`
+- ✅ Caption da foto usada como `entidade_nome` → título `[Pagar] <entidade>` no Calendar
+- ✅ Se sem caption: auto-detecção via `classify_email()` no texto OCR
+- ✅ `/start` e `/help` com instruções
+- ✅ Polling `poll_interval=60s` — sem servidor exposto na internet
+- ✅ Quando valor não é extraído: bot envia o texto OCR bruto de volta ao utilizador para diagnóstico
+- ✅ `ImageProcessor` com pré-processamento multi-variante (autocontrast + thresholds) robusto a papel texturado
+
+**Pré-requisito de sistema**: `brew install tesseract tesseract-lang`
+
+**Execução**: `python -m src.bot` (paralelo com o agendamento em `main.py`)
 
 ---
 
@@ -244,8 +263,10 @@ Não implementar agora. Quando chegar ao PASSO 8:
 - `events().delete()` - deletar evento
 
 **Telegram Bot API**:
-- `sendMessage` - enviar mensagem
-- `getMe` - testar conexão
+- `getUpdates` (polling) — receber fotos e PDFs enviados ao bot
+- `getFile` / download — descarregar imagem recebida
+- `sendMessage` — enviar mensagem
+- `getMe` — testar conexão
 
 ---
 
